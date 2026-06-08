@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# CSS GLOBAL (mesmo padrão visual do FLV Normal)
+# CSS GLOBAL
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -137,116 +137,53 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover {
 LOJAS = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 MAPA_LOJAS = {l: l for l in LOJAS}
 
-FORNECEDORES_CONFIG = {
-    "Sidnei / Evanilde": {
-        "lojas": ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06"],
-        "produtos": [
-            {"Código": 9250,  "Descrição": "Cebolinha"},
-            {"Código": 9311,  "Descrição": "Couve Manteiga"},
-        ]
-    },
-    "Sidnei Gudelumes": {
-        "lojas": ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06"],
-        "produtos": [
-            {"Código": 14144, "Descrição": "Brocólis Maço"},
-        ]
-    },
-    "Ricardo Morakami": {
-        "lojas": ["Loja 05", "Loja 06"],
-        "produtos": [
-            {"Código": 253295, "Descrição": "Alface Hidropônica"},
-            {"Código": 346151, "Descrição": "Rucula Hidropônica"},
-        ]
-    },
-    "Paulo Fukunaga": {
-        "lojas": ["Loja 01", "Loja 02", "Loja 03", "Loja 04"],
-        "produtos": [
-            {"Código": 16902,  "Descrição": "Alface Hidropônica"},
-            {"Código": 452115, "Descrição": "Rucula Hidropônica"},
-        ]
-    },
-    "Perola Verde": {
-        "lojas": ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 07", "Loja 08"],
-        "produtos": [
-            {"Código": 637062, "Descrição": "Alface Crespa Roxa"},
-            {"Código": 457916, "Descrição": "Alface Hidropônica"},
-            {"Código": 637071, "Descrição": "Alface Lisa"},
-            {"Código": 637088, "Descrição": "Alface Mimosa Verde"},
-            {"Código": 0,      "Descrição": "Alface Mista"},
-            {"Código": 1,      "Descrição": "Almeirão Hidropônico"},
-            {"Código": 457925, "Descrição": "Rucula Hidropônica"},
-        ]
-    },
-    "Fenato": {
-        "lojas": ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06"],
-        "produtos": [
-            {"Código": 513063, "Descrição": "Alface Americana"},
-            {"Código": 513744, "Descrição": "Alface Crespa"},
-            {"Código": 513045, "Descrição": "Alface Roxa"},
-            {"Código": 453363, "Descrição": "Almeirão"},
-            {"Código": 9205,   "Descrição": "Chicória"},
-            {"Código": 44493,  "Descrição": "Coentro Maço"},
-            {"Código": 0,      "Descrição": "Rúcula"},
-            {"Código": 9269,   "Descrição": "Salsinha"},
-        ]
-    },
-    "Suzuki": {
-        "lojas": ["Loja 05", "Loja 06"],
-        "produtos": [
-            {"Código": 459154, "Descrição": "Alface Hidropônica"},
-            {"Código": 459163, "Descrição": "Rucula Hidropônica"},
-        ]
-    },
-    "Anderson Assaí": {
-        "lojas": ["Loja 07"],
-        "produtos": [
-            {"Código": 34159, "Descrição": "Alface Americana"},
-            {"Código": 9241,  "Descrição": "Alface Crespa"},
-            {"Código": 9214,  "Descrição": "Almeirão"},
-            {"Código": 9250,  "Descrição": "Cebolinha"},
-            {"Código": 44493, "Descrição": "Coentro"},
-            {"Código": 9269,  "Descrição": "Salsinha"},
-            {"Código": 9311,  "Descrição": "Couve Manteiga Maço"},
-        ]
-    },
-}
-
 # ─────────────────────────────────────────────
 # CONEXÃO GOOGLE SHEETS & FUNÇÕES DE DADOS
 # ─────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=15) # O Cache atualiza a cada 15 segundos para sincronizar as lojas
-def carregar_pedidos():
-    df = conn.read(worksheet="Folhagem")
+@st.cache_data(ttl=15)
+def carregar_catalogo_folhagem():
+    """Lê a aba Produtos_Folhagem e garante os tipos corretos"""
+    df = conn.read(worksheet="Produtos_Folhagem")
+    if df.empty:
+        return pd.DataFrame(columns=["Código", "Descrição", "Fornecedor"] + LOJAS)
     
-    # Se a planilha estiver vazia, cria a estrutura inicial e joga pro Sheets
-    if df.empty or "Fornecedor" not in df.columns:
-        linhas = []
-        for forn, cfg in FORNECEDORES_CONFIG.items():
-            for prod in cfg["produtos"]:
-                linha = {
-                    "Fornecedor": forn,
-                    "Código": prod["Código"],
-                    "Descrição": prod["Descrição"],
-                }
-                for loja in LOJAS:
-                    linha[loja] = 0
-                linhas.append(linha)
-        df_init = pd.DataFrame(linhas)
-        conn.update(worksheet="Folhagem", data=df_init)
-        return df_init
-    
-    # Tratamento de segurança: Garante que quantidades são inteiros e não nulos
+    # Tratamento para garantir que as lojas sejam booleanas para os checkboxes funcionarem
     for loja in LOJAS:
-        if loja in df.columns:
-            df[loja] = pd.to_numeric(df[loja], errors='coerce').fillna(0).astype(int)
-            
+        if loja not in df.columns:
+            df[loja] = False
+        else:
+            df[loja] = df[loja].astype(str).str.upper().map({'TRUE': True, 'FALSE': False}).fillna(False)
     return df
 
+@st.cache_data(ttl=15)
+def carregar_pedidos():
+    """Lê a aba Folhagem (Pedidos). Se vazia, constrói baseada no Catálogo."""
+    df_pedidos = conn.read(worksheet="Folhagem")
+    df_cat = carregar_catalogo_folhagem()
+    
+    if df_pedidos.empty or "Fornecedor" not in df_pedidos.columns:
+        df_init = df_cat[["Código", "Descrição", "Fornecedor"]].copy()
+        for loja in LOJAS:
+            df_init[loja] = 0
+        if not df_init.empty:
+            conn.update(worksheet="Folhagem", data=df_init)
+        return df_init
+    
+    # Garante inteiros nas colunas de pedido
+    for loja in LOJAS:
+        if loja in df_pedidos.columns:
+            df_pedidos[loja] = pd.to_numeric(df_pedidos[loja], errors='coerce').fillna(0).astype(int)
+            
+    return df_pedidos
+
 def salvar_pedidos(df_to_save):
-    # Atualiza o Google Sheets e limpa o cache para forçar leitura nova
     conn.update(worksheet="Folhagem", data=df_to_save)
+    st.cache_data.clear()
+
+def salvar_catalogo(df_to_save):
+    conn.update(worksheet="Produtos_Folhagem", data=df_to_save)
     st.cache_data.clear()
 
 if 'reset_counter_folhagem' not in st.session_state:
@@ -280,7 +217,6 @@ if st.session_state['usuario_logado_folhagem'] is None:
             usuarios_permitidos = ["Selecione..."] + ["Administrador"] + LOJAS
             usuario_selecionado = st.selectbox("👤 Usuário de acesso:", usuarios_permitidos)
             
-            # Bloqueio de autocomplete adicionado aqui
             senha_digitada = st.text_input("🔑 Senha de acesso:", type="password", autocomplete="off")
             
             st.write("<br>", unsafe_allow_html=True)
@@ -333,15 +269,19 @@ with st.sidebar:
             "Separação e Fechamento",
             "Visão das Lojas",
             "Visão Fornecedores (Resumo)",
+            "Catálogo de Produtos" # Nova rota adicionada
         ])
     else:
         perfil_navegacao = "Visão das Lojas"
 
     st.divider()
     
-    # Indicador de Preenchimento (Lê do Sheets)
     df_ped = carregar_pedidos()
-    total_preenchidos = (df_ped[LOJAS] > 0).any(axis=1).sum()
+    if not df_ped.empty and set(LOJAS).issubset(df_ped.columns):
+        total_preenchidos = (df_ped[LOJAS] > 0).any(axis=1).sum()
+    else:
+        total_preenchidos = 0
+        
     st.metric("Itens c/ pedido", total_preenchidos, help="Itens com ao menos 1 quantidade preenchida")
     
     st.divider()
@@ -350,7 +290,7 @@ with st.sidebar:
         st.rerun()
 
 # ─────────────────────────────────────────────
-# FUNÇÃO MODAL DE CONFIRMAÇÃO PARA ZERAR (VIA GOOGLE SHEETS)
+# FUNÇÃO MODAL DE CONFIRMAÇÃO PARA ZERAR
 # ─────────────────────────────────────────────
 @st.dialog("🚨 Confirmação Necessária")
 def modal_zerar_pedidos():
@@ -367,7 +307,8 @@ def modal_zerar_pedidos():
             st.session_state['reset_counter_folhagem'] += 1
             df_main = carregar_pedidos()
             for loja in LOJAS:
-                df_main[loja] = 0
+                if loja in df_main.columns:
+                    df_main[loja] = 0
             salvar_pedidos(df_main)
             st.rerun()
 
@@ -387,6 +328,11 @@ if perfil_navegacao == "Separação e Fechamento":
 
     with st.container(border=True):
         df_base = carregar_pedidos()
+        
+        if df_base.empty:
+            st.warning("A base de pedidos está vazia. Cadastre produtos no Catálogo primeiro.")
+            st.stop()
+            
         df_base["TOTAL GERAL"] = df_base[LOJAS].sum(axis=1)
 
         col_cfg = {
@@ -415,7 +361,6 @@ if perfil_navegacao == "Separação e Fechamento":
 
         with col_salvar:
             if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-                # Remove a coluna calculada 'TOTAL GERAL' antes de enviar para o Sheets
                 df_to_save = df_editado.drop(columns=["TOTAL GERAL"])
                 salvar_pedidos(df_to_save)
                 st.success("✅ Pedidos salvos na nuvem com sucesso!")
@@ -468,20 +413,28 @@ elif perfil_navegacao == "Visão das Lojas":
             st.session_state['usuario_logado_folhagem'] = None
             st.rerun()
 
-    fornecedores_da_loja = [
-        forn for forn, cfg in FORNECEDORES_CONFIG.items()
-        if loja_selecionada in cfg["lojas"]
-    ]
+    # Puxa o catálogo e filtra APENAS os itens habilitados (True) para a loja selecionada
+    df_cat = carregar_catalogo_folhagem()
+    df_cat_loja = df_cat[df_cat[loja_selecionada] == True].copy()
+    
+    if df_cat_loja.empty:
+        st.warning(f"Nenhum produto habilitado para a {loja_selecionada} no momento.")
+        st.stop()
 
+    # Puxa os pedidos atuais e faz um "Left Join" com o catálogo permitido
     df_all = carregar_pedidos()
-    df_loja_view = df_all[df_all["Fornecedor"].isin(fornecedores_da_loja)][
-        ["Fornecedor", "Código", "Descrição", loja_selecionada]
-    ].copy().rename(columns={loja_selecionada: "Qtde"})
+    df_loja_view = pd.merge(
+        df_cat_loja[["Fornecedor", "Código", "Descrição"]],
+        df_all[["Código", "Descrição", "Fornecedor", loja_selecionada]],
+        on=["Código", "Descrição", "Fornecedor"],
+        how="left"
+    )
+    df_loja_view[loja_selecionada] = df_loja_view[loja_selecionada].fillna(0).astype(int)
+    df_loja_view = df_loja_view.rename(columns={loja_selecionada: "Qtde"})
 
     with st.container(border=True):
-        st.info("💡 Preencha a *Qtde* desejada para cada produto. Apenas os fornecedores que atendem esta loja são exibidos.")
+        st.info("💡 Preencha a *Qtde* desejada para cada produto. Apenas os fornecedores e itens atrelados a esta loja são exibidos.")
 
-        # Otimização visual da tabela para não esticar demais
         col_cfg_loja = {
             "Fornecedor": st.column_config.TextColumn("Fornecedor", width=200, disabled=True),
             "Código":     st.column_config.NumberColumn("Cód", width=80, format="%d", disabled=True),
@@ -489,7 +442,6 @@ elif perfil_navegacao == "Visão das Lojas":
             "Qtde":       st.column_config.NumberColumn("🛒 Qtde", width=120, min_value=0, step=1),
         }
 
-        # Criação de margens com colunas vazias
         _, col_tabela, _ = st.columns([1, 4, 1])
 
         with col_tabela:
@@ -515,14 +467,24 @@ elif perfil_navegacao == "Visão das Lojas":
         with col_btn:
             st.write("<br>", unsafe_allow_html=True)
             if st.button("💾 Salvar Pedido da Semana", type="primary", use_container_width=True):
-                # Carrega o DF principal para não sobrescrever o que outras lojas fizeram
+                # Carrega o DF principal e atualiza as quantidades da loja atual baseada no Código
                 df_main = carregar_pedidos()
+                
+                # Iterar é a forma mais segura quando os índices mudam
                 for _, row in df_editado.iterrows():
                     mask = (
                         (df_main["Fornecedor"] == row["Fornecedor"]) &
-                        (df_main["Descrição"] == row["Descrição"])
+                        (df_main["Código"] == row["Código"])
                     )
-                    df_main.loc[mask, loja_selecionada] = row["Qtde"]
+                    # Caso o produto exista na aba pedidos, ele atualiza
+                    if mask.any():
+                        df_main.loc[mask, loja_selecionada] = row["Qtde"]
+                    else:
+                        # Fallback de segurança se o item foi adicionado no catálogo agorinha
+                        nova_linha = {"Fornecedor": row["Fornecedor"], "Código": row["Código"], "Descrição": row["Descrição"]}
+                        for l in LOJAS: nova_linha[l] = 0
+                        nova_linha[loja_selecionada] = row["Qtde"]
+                        df_main = pd.concat([df_main, pd.DataFrame([nova_linha])], ignore_index=True)
                 
                 salvar_pedidos(df_main)
                 st.success(f"✅ Pedido da {loja_selecionada} enviado para a nuvem com sucesso!")
@@ -542,21 +504,36 @@ elif perfil_navegacao == "Visão Fornecedores (Resumo)":
     """, unsafe_allow_html=True)
 
     df_all = carregar_pedidos()
-    nomes_fornecedores = list(FORNECEDORES_CONFIG.keys())
+    df_cat = carregar_catalogo_folhagem()
+    
+    if df_all.empty or df_cat.empty:
+        st.warning("Não há dados de pedidos ou catálogo preenchidos.")
+        st.stop()
+
+    nomes_fornecedores = df_cat["Fornecedor"].dropna().unique().tolist()
 
     for i in range(0, len(nomes_fornecedores), 1):
         cols = st.columns(1, gap="small")
         for j, fornecedor in enumerate(nomes_fornecedores[i:i+1]):
-            cfg = FORNECEDORES_CONFIG[fornecedor]
-            lojas_forn = cfg["lojas"]
+            
+            # Descobrir quais lojas são atendidas por este fornecedor checando o catálogo
+            df_cat_forn = df_cat[df_cat["Fornecedor"] == fornecedor]
+            lojas_forn = [l for l in LOJAS if df_cat_forn[l].any()]
+            
+            if not lojas_forn:
+                continue # Se o fornecedor não atende nenhuma loja, pula
+
             lojas_renomeadas = {l: MAPA_LOJAS[l] for l in lojas_forn}
 
             df_forn = df_all[df_all["Fornecedor"] == fornecedor].copy()
-            df_forn = df_forn[["Código", "Descrição"] + lojas_forn].copy()
-            df_forn["TOTAL"] = df_forn[lojas_forn].sum(axis=1)
+            
+            # Garante que as colunas das lojas existem antes de processar
+            colunas_presentes = [c for c in lojas_forn if c in df_forn.columns]
+            df_forn = df_forn[["Código", "Descrição"] + colunas_presentes].copy()
+            df_forn["TOTAL"] = df_forn[colunas_presentes].sum(axis=1)
             df_forn = df_forn.rename(columns=lojas_renomeadas)
 
-            lojas_cols_renomeadas = list(lojas_renomeadas.values())
+            lojas_cols_renomeadas = [MAPA_LOJAS[l] for l in colunas_presentes]
 
             col_cfg_forn = {
                 "Código":    st.column_config.NumberColumn("Cód", format="%d", disabled=False),
@@ -579,7 +556,7 @@ elif perfil_navegacao == "Visão Fornecedores (Resumo)":
                     )
                     st.markdown('</div>', unsafe_allow_html=True)
 
-                    lojas_str = " · ".join([MAPA_LOJAS[l] for l in lojas_forn])
+                    lojas_str = " · ".join([MAPA_LOJAS[l] for l in colunas_presentes])
                     st.caption(f"Atende: {lojas_str}")
 
                     cols_order_forn = ["Código", "Descrição"] + lojas_cols_renomeadas + ["TOTAL"]
@@ -601,3 +578,46 @@ elif perfil_navegacao == "Visão Fornecedores (Resumo)":
                     """, unsafe_allow_html=True)
 
         st.write("<br>", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# ROTA 4 — CATÁLOGO DE PRODUTOS (Nova Rota)
+# ─────────────────────────────────────────────
+elif perfil_navegacao == "Catálogo de Produtos":
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, var(--green-dark) 0%, #0d2018 100%); padding: 14px 20px; border-radius: 10px; margin-bottom: 22px;">
+        <span style="font-size: 26px; margin-right: 12px;">🗂️</span>
+        <div style="display: inline-block; vertical-align: top;">
+            <div style="font-size: 20px; font-weight: 700; color: var(--text-header);">Catálogo de Folhagem</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Gerencie itens e controle a visibilidade por loja através das caixas de seleção</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    df_catalogo = carregar_catalogo_folhagem()
+    
+    with st.container(border=True):
+        
+        # Configuração para que as colunas das lojas sejam renderizadas como Checkboxes
+        col_cfg_cat = {
+            "Código":     st.column_config.NumberColumn("Cód.", width=80, format="%d"),
+            "Descrição":  st.column_config.TextColumn("Descrição do Item", width=300),
+            "Fornecedor": st.column_config.TextColumn("Fornecedor", width=180),
+        }
+        for loja in LOJAS:
+            col_cfg_cat[loja] = st.column_config.CheckboxColumn(loja, default=False)
+            
+        edited_cat = st.data_editor(
+            df_catalogo,
+            use_container_width=True,
+            hide_index=True,
+            height=600,
+            num_rows="dynamic", # O Admin pode adicionar ou apagar linhas aqui mesmo!
+            column_config=col_cfg_cat,
+            key="editor_catalogo_folhagem"
+        )
+        
+        st.divider()
+        if st.button("💾 Salvar Catálogo no Google Sheets", type="primary", use_container_width=True):
+            salvar_catalogo(edited_cat)
+            st.success("✅ Catálogo atualizado com sucesso! As alterações já refletem na visão das lojas.")
+            st.rerun()
