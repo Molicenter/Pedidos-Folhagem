@@ -144,22 +144,23 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=15)
 def carregar_catalogo_folhagem():
-    """Lê a aba Produtos_Folhagem e garante os tipos corretos"""
-    df = conn.read(worksheet="Produtos_Folhagem")
+    # VILÃO 1 RESOLVIDO: Passamos o ttl=5 direto no conn.read para forçar a API do Sheets a buscar o dado fresco
+    df = conn.read(worksheet="Produtos_Folhagem", ttl=5)
+    
     if df.empty:
         return pd.DataFrame(columns=["Código", "Descrição", "Fornecedor"] + LOJAS)
     
-    # Tratamento ROBUSTO para os Checkboxes (Garante leitura de PT/EN e espaços ocultos)
+    # VILÃO 2 RESOLVIDO: Limpa espaços em branco invisíveis no cabeçalho (ex: "Loja 01 " vira "Loja 01")
+    df.columns = df.columns.str.strip()
+    
+    # Tratamento ROBUSTO para os Checkboxes
     for loja in LOJAS:
         if loja not in df.columns:
             df[loja] = False
         else:
-            # Transforma em texto, tira espaços e deixa maiúsculo. 
-            # Aceita TRUE, VERDADEIRO, 1, etc.
             valores_texto = df[loja].astype(str).str.upper().str.strip()
-            df[loja] = valores_texto.isin(["TRUE", "VERDADEIRO", "1", "V"])
+            df[loja] = valores_texto.isin(["TRUE", "VERDADEIRO", "1", "V", "SIM"])
             
-    # Garante que o código é um número Inteiro (evita 9250.0 quebrar o sistema)
     if "Código" in df.columns:
         df["Código"] = pd.to_numeric(df["Código"], errors='coerce').fillna(0).astype(int)
         
@@ -167,8 +168,8 @@ def carregar_catalogo_folhagem():
 
 @st.cache_data(ttl=15)
 def carregar_pedidos():
-    """Lê a aba Folhagem (Pedidos). Se vazia, constrói baseada no Catálogo."""
-    df_pedidos = conn.read(worksheet="Folhagem")
+    # Passamos o ttl=5 aqui também para os pedidos ficarem em tempo real
+    df_pedidos = conn.read(worksheet="Folhagem", ttl=5)
     df_cat = carregar_catalogo_folhagem()
     
     if df_pedidos.empty or "Fornecedor" not in df_pedidos.columns:
@@ -179,7 +180,6 @@ def carregar_pedidos():
             conn.update(worksheet="Folhagem", data=df_init)
         return df_init
     
-    # Garante que o código nos pedidos também seja Inteiro para cruzar com o catálogo
     if "Código" in df_pedidos.columns:
         df_pedidos["Código"] = pd.to_numeric(df_pedidos["Código"], errors='coerce').fillna(0).astype(int)
         
