@@ -474,15 +474,13 @@ elif perfil_navegacao == "Visão das Lojas":
         st.info("💡 Preencha a *Qtde* desejada para cada produto. Apenas os fornecedores e itens atrelados a esta loja são exibidos.")
 
         col_cfg_loja = {
-            "Fornecedor": st.column_config.TextColumn("Fornecedor", width=200, disabled=True),
-            "Código":     st.column_config.NumberColumn("Cód", width=80, format="%d", disabled=True),
-            "Descrição":  st.column_config.TextColumn("Produto", width=400, disabled=True),
-            "Qtde":       st.column_config.NumberColumn("🛒 Qtde", width=120, min_value=0, step=1),
+            "Fornecedor": st.column_config.TextColumn("Fornecedor", width=150, disabled=True),
+            "Código":     st.column_config.NumberColumn("Cód", width=65, format="%d", disabled=True),
+            "Descrição":  st.column_config.TextColumn("Produto", width=220, disabled=True),
+            "Qtde":       st.column_config.NumberColumn("🛒 Qtde", width=90, min_value=0, step=1),
         }
 
-        _, col_tabela, _ = st.columns([1, 4, 1])
-
-        with col_tabela:
+        with st.container():
             df_editado = st.data_editor(
                 df_loja_view,
                 column_config=col_cfg_loja,
@@ -598,7 +596,6 @@ elif perfil_navegacao == "Visão Fornecedores (Resumo)":
                         use_container_width=True,
                         column_config=col_cfg_forn,
                         height=altura,
-                        num_rows="dynamic",
                         key=f"forn_folhagem_{fornecedor}_{st.session_state['reset_counter_folhagem']}"
                     )
 
