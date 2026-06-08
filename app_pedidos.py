@@ -149,12 +149,20 @@ def carregar_catalogo_folhagem():
     if df.empty:
         return pd.DataFrame(columns=["Código", "Descrição", "Fornecedor"] + LOJAS)
     
-    # Tratamento para garantir que as lojas sejam booleanas para os checkboxes funcionarem
+    # Tratamento ROBUSTO para os Checkboxes (Garante leitura de PT/EN e espaços ocultos)
     for loja in LOJAS:
         if loja not in df.columns:
             df[loja] = False
         else:
-            df[loja] = df[loja].astype(str).str.upper().map({'TRUE': True, 'FALSE': False}).fillna(False)
+            # Transforma em texto, tira espaços e deixa maiúsculo. 
+            # Aceita TRUE, VERDADEIRO, 1, etc.
+            valores_texto = df[loja].astype(str).str.upper().str.strip()
+            df[loja] = valores_texto.isin(["TRUE", "VERDADEIRO", "1", "V"])
+            
+    # Garante que o código é um número Inteiro (evita 9250.0 quebrar o sistema)
+    if "Código" in df.columns:
+        df["Código"] = pd.to_numeric(df["Código"], errors='coerce').fillna(0).astype(int)
+        
     return df
 
 @st.cache_data(ttl=15)
@@ -171,6 +179,10 @@ def carregar_pedidos():
             conn.update(worksheet="Folhagem", data=df_init)
         return df_init
     
+    # Garante que o código nos pedidos também seja Inteiro para cruzar com o catálogo
+    if "Código" in df_pedidos.columns:
+        df_pedidos["Código"] = pd.to_numeric(df_pedidos["Código"], errors='coerce').fillna(0).astype(int)
+        
     # Garante inteiros nas colunas de pedido
     for loja in LOJAS:
         if loja in df_pedidos.columns:
@@ -185,10 +197,6 @@ def salvar_pedidos(df_to_save):
 def salvar_catalogo(df_to_save):
     conn.update(worksheet="Produtos_Folhagem", data=df_to_save)
     st.cache_data.clear()
-
-if 'reset_counter_folhagem' not in st.session_state:
-    st.session_state['reset_counter_folhagem'] = 0
-
 # ─────────────────────────────────────────────
 # SISTEMA DE LOGIN
 # ─────────────────────────────────────────────
