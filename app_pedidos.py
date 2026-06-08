@@ -133,7 +133,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover {
 # ─────────────────────────────────────────────
 # CONSTANTES
 # ─────────────────────────────────────────────
-LOJAS = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
+LOJAS = [Loja 01"", ""Loja 02"", ""Loja 03"", ""Loja 04"", ""Loja 05"", ""Loja 06"", ""Loja 07"", ""Loja 08""]"
 MAPA_LOJAS = {l: l for l in LOJAS}
 
 # ─────────────────────────────────────────────
@@ -396,27 +396,12 @@ if perfil_navegacao == "Separação e Fechamento":
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                use_container_width=True)
 
-
         with col_zerar:
-            if not st.session_state['confirmar_zerar_folhagem']:
-                if st.button("🚨 Zerar Todos os Pedidos", use_container_width=True):
-                    st.session_state['confirmar_zerar_folhagem'] = True
-                    st.rerun()
-            else:
-                st.warning("⚠️ Tem certeza? Todos os pedidos serão apagados!")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("✅ Confirmar", type="primary", use_container_width=True):
-                        st.session_state['reset_counter_folhagem'] += 1
-                        st.session_state['df_pedidos_folhagem'][LOJAS] = 0
-                        st.session_state['confirmar_zerar_folhagem'] = False
-                        st.success("✅ Todos os pedidos zerados!")
-                        st.rerun()
-                with c2:
-                    if st.button("❌ Cancelar", use_container_width=True):
-                        st.session_state['confirmar_zerar_folhagem'] = False
-                        st.rerun()
-        
+            if st.button("🚨 Zerar Todos os Pedidos", use_container_width=True):
+                st.session_state['reset_counter_folhagem'] += 1
+                st.session_state['df_pedidos_folhagem'][LOJAS] = 0
+                st.success("✅ Todos os pedidos zerados!")
+                st.rerun()
 
 # ─────────────────────────────────────────────
 # ROTA 2 — VISÃO DAS LOJAS
