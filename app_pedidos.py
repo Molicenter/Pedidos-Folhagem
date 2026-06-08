@@ -396,12 +396,27 @@ if perfil_navegacao == "Separação e Fechamento":
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                use_container_width=True)
 
+
         with col_zerar:
-            if st.button("🚨 Zerar Todos os Pedidos", use_container_width=True):
-                st.session_state['reset_counter_folhagem'] += 1
-                st.session_state['df_pedidos_folhagem'][LOJAS] = 0
-                st.success("✅ Todos os pedidos zerados!")
-                st.rerun()
+            if not st.session_state['confirmar_zerar_folhagem']:
+                if st.button("🚨 Zerar Todos os Pedidos", use_container_width=True):
+                    st.session_state['confirmar_zerar_folhagem'] = True
+                    st.rerun()
+            else:
+                st.warning("⚠️ Tem certeza? Todos os pedidos serão apagados!")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ Confirmar", type="primary", use_container_width=True):
+                        st.session_state['reset_counter_folhagem'] += 1
+                        st.session_state['df_pedidos_folhagem'][LOJAS] = 0
+                        st.session_state['confirmar_zerar_folhagem'] = False
+                        st.success("✅ Todos os pedidos zerados!")
+                        st.rerun()
+                with c2:
+                    if st.button("❌ Cancelar", use_container_width=True):
+                        st.session_state['confirmar_zerar_folhagem'] = False
+                        st.rerun()
+        
 
 # ─────────────────────────────────────────────
 # ROTA 2 — VISÃO DAS LOJAS
