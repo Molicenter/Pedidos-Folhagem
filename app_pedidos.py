@@ -138,7 +138,6 @@ MAPA_LOJAS = {l: l for l in LOJAS}
 
 # ─────────────────────────────────────────────
 # ESTRUTURA DE FORNECEDORES E PRODUTOS (do Excel)
-# Cada fornecedor tem: lista de produtos e quais lojas atende
 # ─────────────────────────────────────────────
 FORNECEDORES_CONFIG = {
     "Sidnei / Evanilde": {
@@ -217,8 +216,6 @@ FORNECEDORES_CONFIG = {
 # ─────────────────────────────────────────────
 # INICIALIZAÇÃO DO SESSION STATE
 # ─────────────────────────────────────────────
-
-# Tabela de pedidos: uma linha por (fornecedor + produto), colunas = lojas
 if 'df_pedidos_folhagem' not in st.session_state:
     linhas = []
     for forn, cfg in FORNECEDORES_CONFIG.items():
@@ -329,6 +326,25 @@ with st.sidebar:
         st.rerun()
 
 # ─────────────────────────────────────────────
+# FUNÇÃO MODAL DE CONFIRMAÇÃO PARA ZERAR
+# ─────────────────────────────────────────────
+@st.dialog("🚨 Confirmação Necessária")
+def modal_zerar_pedidos():
+    st.markdown("Tem certeza que deseja **zerar todos os pedidos** de todas as lojas?")
+    st.markdown("⚠️ *Esta ação não poderá ser desfeita.*")
+    
+    st.write("<br>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("❌ Não, cancelar", use_container_width=True):
+            st.rerun()
+    with c2:
+        if st.button("✔️ Sim, zerar tudo", type="primary", use_container_width=True):
+            st.session_state['reset_counter_folhagem'] += 1
+            st.session_state['df_pedidos_folhagem'][LOJAS] = 0
+            st.rerun()
+
+# ─────────────────────────────────────────────
 # ROTA 1 — SEPARAÇÃO E FECHAMENTO (Admin)
 # ─────────────────────────────────────────────
 if perfil_navegacao == "Separação e Fechamento":
@@ -397,11 +413,9 @@ if perfil_navegacao == "Separação e Fechamento":
                                use_container_width=True)
 
         with col_zerar:
+            # Chama a função do modal recém-criada em vez de limpar direto
             if st.button("🚨 Zerar Todos os Pedidos", use_container_width=True):
-                st.session_state['reset_counter_folhagem'] += 1
-                st.session_state['df_pedidos_folhagem'][LOJAS] = 0
-                st.success("✅ Todos os pedidos zerados!")
-                st.rerun()
+                modal_zerar_pedidos()
 
 # ─────────────────────────────────────────────
 # ROTA 2 — VISÃO DAS LOJAS
@@ -432,7 +446,6 @@ elif perfil_navegacao == "Visão das Lojas":
             st.session_state['usuario_logado_folhagem'] = None
             st.rerun()
 
-    # Filtrar só os fornecedores que atendem esta loja
     fornecedores_da_loja = [
         forn for forn, cfg in FORNECEDORES_CONFIG.items()
         if loja_selecionada in cfg["lojas"]
@@ -505,7 +518,6 @@ elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         for j, fornecedor in enumerate(nomes_fornecedores[i:i+1]):
             cfg = FORNECEDORES_CONFIG[fornecedor]
             lojas_forn = cfg["lojas"]
-            # Nomes renomeados só das lojas que este fornecedor atende
             lojas_renomeadas = {l: MAPA_LOJAS[l] for l in lojas_forn}
 
             df_forn = df_all[df_all["Fornecedor"] == fornecedor].copy()
