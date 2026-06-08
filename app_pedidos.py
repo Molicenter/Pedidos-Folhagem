@@ -279,7 +279,7 @@ if st.session_state['usuario_logado_folhagem'] is None:
             st.divider()
             usuarios_permitidos = ["Selecione..."] + ["Administrador"] + LOJAS
             usuario_selecionado = st.selectbox("👤 Usuário de acesso:", usuarios_permitidos)
-            senha_digitada = st.text_input("🔑 Senha de acesso:", type="password")
+            senha_digitada = st.text_input("🔑 Senha de acesso:", type="password", autocomplete="off")
             st.write("<br>", unsafe_allow_html=True)
 
             if st.button("Entrar no Sistema", type="primary", use_container_width=True):
