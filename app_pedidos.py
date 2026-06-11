@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import streamlit.components.v1 as components
 from streamlit_gsheets import GSheetsConnection
 
 # ─────────────────────────────────────────────
@@ -23,7 +24,7 @@ if 'usuario_logado_folhagem' not in st.session_state:
     st.session_state['usuario_logado_folhagem'] = None
 
 # ─────────────────────────────────────────────
-# CSS GLOBAL
+# CSS GLOBAL E DE IMPRESSÃO
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -137,6 +138,69 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover {
 .topbar-left { display: flex; align-items: center; gap: 12px; }
 .topbar-title { font-size: 18px; font-weight: 700; color: var(--text-header); }
 .topbar-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* REGRAS DE IMPRESSÃO */
+@media print {
+    @page { margin: 10mm; }
+    .stApp, .main, body, html {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        background-image: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .main .block-container, [data-testid="stAppViewBlockContainer"] {
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+    }
+    header, [data-testid="stSidebar"], [data-testid="stHeader"] { display: none !important; }
+    [data-testid="stElementContainer"]:has([data-testid="stDataEditor"]),
+    [data-testid="stElementContainer"]:has(.topbar-loja),
+    [data-testid="stElementContainer"]:has([data-testid="stMetric"]),
+    [data-testid="stElementContainer"]:has(button),
+    [data-testid="stHorizontalBlock"],
+    div[data-testid="stVerticalBlockBorderWrapper"],
+    hr, .stAlert, .stInfo { display: none !important; }
+    #print-section {
+        display: block !important;
+        width: 100% !important;
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+    }
+    #print-section h2 {
+        font-size: 16px !important;
+        margin: 0 0 10px 0 !important;
+        padding-bottom: 5px !important;
+        border-bottom: 1px solid #000 !important;
+        color: #000 !important;
+    }
+    .print-container { width: 100%; }
+    table.print-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px !important;
+        color: #000000 !important;
+        font-family: 'IBM Plex Sans', sans-serif;
+        line-height: 1.1 !important;
+    }
+    table.print-table th, table.print-table td {
+        border: 1px solid #000000 !important;
+        padding: 3px 5px !important;
+        text-align: left;
+        color: #000000 !important;
+        background-color: #ffffff !important;
+    }
+    table.print-table th {
+        background-color: #e0e0e0 !important;
+        font-weight: bold;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    table.print-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+}
+@media screen {
+    #print-section { display: none !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -397,8 +461,23 @@ if perfil_navegacao == "Separação e Fechamento":
             key=f"sep_editor_{st.session_state['reset_counter_folhagem']}"
         )
 
+        # ── HTML INVISÍVEL PARA IMPRESSÃO ─────────────────────────────
+        html_table = df_editado.to_html(index=False, classes="print-table")
+        st.markdown(f"""
+        <div id="print-section">
+            <h2 style="color: black; margin-bottom: 10px; text-align: center; border-bottom: 2px solid black; padding-bottom: 5px;">
+                Resumo de Separação — Folhagem
+            </h2>
+            <div class="print-container">
+                {html_table}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        # ──────────────────────────────────────────────────────────────
+
         st.divider()
-        col_salvar, col_csv, col_excel, col_zerar, _ = st.columns([2.5, 1.5, 1.5, 2, 2.5])
+        # Adicionada a coluna extra para o botão de impressão
+        col_salvar, col_csv, col_excel, col_print, col_zerar = st.columns([2.5, 1.2, 1.2, 1.5, 2.5])
 
         with col_salvar:
             if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
@@ -420,6 +499,10 @@ if perfil_navegacao == "Separação e Fechamento":
             st.download_button("⬇️ Excel", data=buffer.getvalue(), file_name="separacao_folhagem.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                use_container_width=True)
+                               
+        with col_print:
+            if st.button("🖨️ Imprimir", use_container_width=True):
+                components.html("<script>window.parent.print();</script>", height=0)
 
         with col_zerar:
             if st.button("🚨 Zerar Todos os Pedidos", use_container_width=True):
