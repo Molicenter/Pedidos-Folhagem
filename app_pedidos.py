@@ -244,8 +244,7 @@ def buscar_estoque_pg(loja_nome, codigos):
 
 def buscar_produtos_pg(codigos):
     """
-    Agora recebe os códigos atuais da planilha para buscar SOMENTE
-    os nomes deles, evitando puxar o banco inteiro.
+    Busca SOMENTE as descrições dos códigos solicitados.
     """
     if not codigos:
         return pd.DataFrame(columns=["Código", "Descrição"])
@@ -272,9 +271,9 @@ def buscar_produtos_pg(codigos):
 def carregar_catalogo_folhagem():
     df = conn.read(worksheet="Produtos_Folhagem", ttl=0, usecols=list(range(20)))
     
-    # Adicionamos a coluna 'Nome Personalizado' caso não exista
+    # Removida a "Exceção" da criação e manipulação
     if df.empty:
-        return pd.DataFrame(columns=["Código", "Descrição", "Nome Personalizado", "Fornecedor", "Exceção"] + LOJAS)
+        return pd.DataFrame(columns=["Código", "Descrição", "Nome Personalizado", "Fornecedor"] + LOJAS)
     
     novas_colunas = {}
     for col in df.columns:
@@ -282,17 +281,14 @@ def carregar_catalogo_folhagem():
         for loja in LOJAS:
             if loja.lower() in col_str.lower():
                 novas_colunas[col] = loja
-        if "exce" in col_str.lower():
-            novas_colunas[col] = "Exceção"
             
     df = df.rename(columns=novas_colunas)
     
-    # Garantir que a coluna Nome Personalizado existe
     if "Nome Personalizado" not in df.columns:
         df["Nome Personalizado"] = ""
     df["Nome Personalizado"] = df["Nome Personalizado"].fillna("").astype(str)
     
-    colunas_booleanas = LOJAS + ["Exceção"]
+    colunas_booleanas = LOJAS
     for col in colunas_booleanas:
         if col not in df.columns:
             df[col] = False
@@ -784,7 +780,7 @@ elif perfil_navegacao == "Catálogo de Produtos":
         <span style="font-size: 26px; margin-right: 12px;">🗂️</span>
         <div style="display: inline-block; vertical-align: top;">
             <div style="font-size: 20px; font-weight: 700; color: var(--text-header);">Catálogo de Folhagem</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Use a coluna Nome Personalizado se desejar esconder o nome original do ERP. Puxe do banco para atualizar.</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Insira o código, Fornecedor e marque as lojas. Depois use Puxar Nomes do ERP para atualizar as descrições.</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -797,13 +793,12 @@ elif perfil_navegacao == "Catálogo de Produtos":
             "Descrição":          st.column_config.TextColumn("Descrição (ERP)", width=220, disabled=True),
             "Nome Personalizado": st.column_config.TextColumn("Nome Personalizado", width=220),
             "Fornecedor":         st.column_config.TextColumn("Fornecedor", width=180),
-            "Exceção":            st.column_config.CheckboxColumn("⚠️ Exceção", default=False, help="Impede que o item seja apagado/sobrescrito pelo Banco de Dados"),
         }
         for loja in LOJAS:
             col_cfg_cat[loja] = st.column_config.CheckboxColumn(loja, default=False)
             
-        # Reordenar exibição do catálogo
-        cols_cat_ordem = ["Código", "Descrição", "Nome Personalizado", "Fornecedor", "Exceção"] + LOJAS
+        # Reordenar exibição do catálogo sem Exceção
+        cols_cat_ordem = ["Código", "Descrição", "Nome Personalizado", "Fornecedor"] + LOJAS
             
         edited_cat = st.data_editor(
             df_catalogo[cols_cat_ordem],
@@ -830,8 +825,8 @@ elif perfil_navegacao == "Catálogo de Produtos":
     with col_puxar:
         if st.button("🔄 Puxar Nomes do ERP", use_container_width=True):
             # 1. Pega APENAS os códigos que já estão na tabela para evitar importar a base inteira
-            codigos_atuais = edited_cat["Código"].unique().tolist()
-            codigos_atuais = [c for c in codigos_atuais if c > 0]
+            codigos_atuais = edited_cat["Código"].dropna().unique().tolist()
+            codigos_atuais = [int(c) for c in codigos_atuais if c > 0]
             
             if not codigos_atuais:
                 st.warning("Não há códigos na tabela para atualizar.")
@@ -842,10 +837,10 @@ elif perfil_navegacao == "Catálogo de Produtos":
                     # 2. Cria um "dicionário" que liga o Código ao Nome do Banco de Dados
                     dict_nomes = dict(zip(df_pg["Código"], df_pg["Descrição"]))
                     
-                    # 3. Atualiza APENAS a coluna de descrição do ERP
+                    # 3. Atualiza APENAS a coluna de descrição do ERP fazendo o mapeamento exato
                     edited_cat["Descrição"] = edited_cat["Código"].map(dict_nomes).fillna(edited_cat["Descrição"])
                     
-                    # 4. Salva o catálogo com os títulos novos mantendo todos os outros dados intactos
+                    # 4. Salva o catálogo apenas com as atualizações de nome
                     salvar_catalogo(edited_cat)
                     st.session_state['reset_counter_folhagem'] += 1
                     st.success("✅ Nomes atualizados com sucesso de acordo com os códigos inseridos!")
