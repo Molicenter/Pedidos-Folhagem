@@ -214,7 +214,6 @@ MAPA_LOJAS = {l: l for l in LOJAS}
 # CONEXÕES COM BANCOS DE DADOS
 # ─────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
-# Adicionada a conexão com Postgres igual ao açougue
 conn_pg = st.connection("postgresql", type="sql")
 
 # ─────────────────────────────────────────────
@@ -225,48 +224,40 @@ def buscar_estoque_pg(loja_nome, codigos):
     if not codigos:
         return pd.DataFrame(columns=["Código", "Estoque"])
     
-    # Extrai o ID numérico da loja (ex: "Loja 01" -> 1) para a query, se seu banco usar ID.
+    # Extrai o ID numérico da loja (ex: "Loja 01" -> 1)
     loja_id = int(loja_nome.split()[-1])
+    # Formata para '001', '002', etc., para bater com a coluna cade_codempresa
+    loja_id_str = f"{loja_id:03d}" 
+    
     cods_str = ", ".join(map(str, set(codigos)))
     
-    # 🔥 MUDE AQUI A SUA QUERY SQL PARA O ESTOQUE 🔥
+    # Consumindo diretamente da view que você criou
     query = f"""
-        SELECT cadprodemp.cade_codempresa,
-    cadprodemp.cade_codigo,
-    cadprod.cadp_descricao,
-    cadprodemp.cade_estoque1::numeric(18,2) AS estoque,
-    cadprodemp.cade_estoque6::numeric(18,2) AS estoqueemb
-   FROM cadprodemp
-     JOIN cadprod ON cadprodemp.cade_codigo = cadprod.cadp_codigo
-     FULL JOIN mvad ON cadprodemp.cade_codmva::text = mvad.mvad_codmva::text
-  WHERE cadprodemp.cade_ativo::text = 'S'::text AND cadprodemp.cade_codempresa::text <= '031'::text
-  ORDER BY cadprodemp.cade_codempresa, cadprodemp.cade_codigo
+        SELECT 
+            cade_codigo AS "Código",
+            estoque AS "Estoque"
+        FROM python_estoque
+        WHERE cade_codempresa = '{loja_id_str}'
+        AND cade_codigo IN ({cods_str})
     """
     try:
-        df_est = conn_pg.query(python_estoque)
+        df_est = conn_pg.query(query)
         return df_est
     except Exception as e:
-        # Se a query falhar ou o banco estiver offline, retorna zero para não quebrar a tela
         return pd.DataFrame({"Código": codigos, "Estoque": 0})
 
 def buscar_produtos_pg():
-    # 🔥 MUDE AQUI A SUA QUERY SQL PARA PUXAR O CATÁLOGO DA FOLHAGEM 🔥
+    # Trazendo os produtos únicos do catálogo (pode ser da loja 001 como base geral)
     query = """
-        SELECT cadprodemp.cade_codempresa,
-    cadprodemp.cade_codigo,
-    cadprod.cadp_descricao,
-    cadprodemp.cade_estoque1::numeric(18,2) AS estoque,
-    cadprodemp.cade_estoque6::numeric(18,2) AS estoqueemb
-   FROM cadprodemp
-     JOIN cadprod ON cadprodemp.cade_codigo = cadprod.cadp_codigo
-     FULL JOIN mvad ON cadprodemp.cade_codmva::text = mvad.mvad_codmva::text
-  WHERE cadprodemp.cade_ativo::text = 'S'::text AND cadprodemp.cade_codempresa::text <= '031'::text
-  ORDER BY cadprodemp.cade_codempresa, cadprodemp.cade_codigo
+        SELECT DISTINCT
+            cade_codigo AS "Código",
+            cadp_descricao AS "Descrição"
+        FROM python_estoque
     """
     try:
-        return conn_pg.query(python_estoque)
+        return conn_pg.query(query)
     except Exception as e:
-        st.error(f"Erro ao buscar produtos no Postgres: {e}")
+        st.error(f"Erro ao buscar produtos na view python_estoque: {e}")
         return pd.DataFrame()
 
 # ─────────────────────────────────────────────
@@ -790,8 +781,8 @@ elif perfil_navegacao == "Catálogo de Produtos":
                 # Isolar produtos marcados como exceção
                 df_excecoes = df_catalogo[df_catalogo["Exceção"] == True].copy()
                 
-                # Fazer o merge dos novos produtos, mantendo a parametrização antiga se já existia
-                cols_manter = ["Código"] + LOJAS + ["Exceção"]
+                # Como a view não traz a coluna Fornecedor, garantimos que ela será mantida do Sheets
+                cols_manter = ["Código", "Fornecedor", "Exceção"] + LOJAS
                 df_merged = pd.merge(df_pg, df_catalogo[cols_manter], on="Código", how="left")
                 
                 # Preencher NaNs com False nas lojas novas vindas do banco
