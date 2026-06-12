@@ -224,14 +224,10 @@ def buscar_estoque_pg(loja_nome, codigos):
     if not codigos:
         return pd.DataFrame(columns=["Código", "Estoque"])
     
-    # Extrai o ID numérico da loja (ex: "Loja 01" -> 1)
     loja_id = int(loja_nome.split()[-1])
-    # Formata para '001', '002', etc., para bater com a coluna cade_codempresa
     loja_id_str = f"{loja_id:03d}" 
-    
     cods_str = ", ".join(map(str, set(codigos)))
     
-    # Consumindo diretamente da view que você criou
     query = f"""
         SELECT 
             cade_codigo AS "Código",
@@ -247,7 +243,6 @@ def buscar_estoque_pg(loja_nome, codigos):
         return pd.DataFrame({"Código": codigos, "Estoque": 0})
 
 def buscar_produtos_pg():
-    # Trazendo os produtos únicos do catálogo (pode ser da loja 001 como base geral)
     query = """
         SELECT DISTINCT
             cade_codigo AS "Código",
@@ -267,10 +262,10 @@ def buscar_produtos_pg():
 def carregar_catalogo_folhagem():
     df = conn.read(worksheet="Produtos_Folhagem", ttl=0, usecols=list(range(20)))
     
+    # Adicionamos a coluna 'Nome Personalizado' caso não exista
     if df.empty:
-        return pd.DataFrame(columns=["Código", "Descrição", "Fornecedor", "Exceção"] + LOJAS)
+        return pd.DataFrame(columns=["Código", "Descrição", "Nome Personalizado", "Fornecedor", "Exceção"] + LOJAS)
     
-    # Limpeza de cabeçalhos
     novas_colunas = {}
     for col in df.columns:
         col_str = str(col).strip()
@@ -282,7 +277,11 @@ def carregar_catalogo_folhagem():
             
     df = df.rename(columns=novas_colunas)
     
-    # Tratamento de booleanos para Lojas e para a coluna Exceção
+    # Garantir que a coluna Nome Personalizado existe
+    if "Nome Personalizado" not in df.columns:
+        df["Nome Personalizado"] = ""
+    df["Nome Personalizado"] = df["Nome Personalizado"].fillna("").astype(str)
+    
     colunas_booleanas = LOJAS + ["Exceção"]
     for col in colunas_booleanas:
         if col not in df.columns:
@@ -595,13 +594,21 @@ elif perfil_navegacao == "Visão das Lojas":
         st.stop()
 
     df_all = carregar_pedidos()
+    
+    # Remove a descrição antiga dos pedidos para garantir que sempre puxe do Catálogo atualizado
+    df_all_clean = df_all.drop(columns=["Descrição"]) if "Descrição" in df_all.columns else df_all
+
     df_loja_view = pd.merge(
-        df_cat_loja[["Fornecedor", "Código", "Descrição"]],
-        df_all[["Código", "Descrição", "Fornecedor", loja_selecionada]],
-        on=["Código", "Descrição", "Fornecedor"],
+        df_cat_loja[["Fornecedor", "Código", "Descrição", "Nome Personalizado"]],
+        df_all_clean[["Código", "Fornecedor", loja_selecionada]],
+        on=["Código", "Fornecedor"],
         how="left"
     )
     df_loja_view[loja_selecionada] = df_loja_view[loja_selecionada].fillna(0).astype(int)
+    
+    # Substitui a Descrição do ERP pelo Nome Personalizado (se existir)
+    mask_personalizado = (df_loja_view["Nome Personalizado"].notna()) & (df_loja_view["Nome Personalizado"].str.strip() != "")
+    df_loja_view.loc[mask_personalizado, "Descrição"] = df_loja_view.loc[mask_personalizado, "Nome Personalizado"]
     
     # Busca o Estoque do Postgres para a Loja Atual
     codigos_lista = df_loja_view["Código"].unique().tolist()
@@ -613,7 +620,7 @@ elif perfil_navegacao == "Visão das Lojas":
     
     df_loja_view = df_loja_view.rename(columns={loja_selecionada: "Qtde"})
 
-    # Reordenar colunas para o Estoque ficar antes da Qtde
+    # Reordenar colunas
     cols_order_view = ["Fornecedor", "Código", "Descrição", "Estoque", "Qtde"]
     df_loja_view = df_loja_view[cols_order_view]
 
@@ -660,6 +667,7 @@ elif perfil_navegacao == "Visão das Lojas":
                     )
                     if mask.any():
                         df_main.loc[mask, loja_selecionada] = row["Qtde"]
+                        df_main.loc[mask, "Descrição"] = row["Descrição"] # Garante atualização do nome na aba Folhagem
                     else:
                         nova_linha = {"Fornecedor": row["Fornecedor"], "Código": row["Código"], "Descrição": row["Descrição"]}
                         for l in LOJAS: nova_linha[l] = 0
@@ -766,55 +774,26 @@ elif perfil_navegacao == "Catálogo de Produtos":
         <span style="font-size: 26px; margin-right: 12px;">🗂️</span>
         <div style="display: inline-block; vertical-align: top;">
             <div style="font-size: 20px; font-weight: 700; color: var(--text-header);">Catálogo de Folhagem</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Gerencie itens, atualize pelo banco e controle a visibilidade por loja através das caixas de seleção</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Use a coluna Nome Personalizado se desejar esconder o nome original do ERP. Puxe do banco para atualizar.</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     df_catalogo = carregar_catalogo_folhagem()
     
-    col_btn_sync, col_space = st.columns([2, 5])
-    with col_btn_sync:
-        if st.button("🔄 Atualizar Produtos com BD Postgres", use_container_width=True):
-            df_pg = buscar_produtos_pg()
-            if not df_pg.empty:
-                # Isolar produtos marcados como exceção
-                df_excecoes = df_catalogo[df_catalogo["Exceção"] == True].copy()
-                
-                # Como a view não traz a coluna Fornecedor, garantimos que ela será mantida do Sheets
-                cols_manter = ["Código", "Fornecedor", "Exceção"] + LOJAS
-                df_merged = pd.merge(df_pg, df_catalogo[cols_manter], on="Código", how="left")
-                
-                # Preencher NaNs com False nas lojas novas vindas do banco
-                for c in LOJAS + ["Exceção"]:
-                    df_merged[c] = df_merged[c].fillna(False)
-                
-                # Resgatar as exceções que possam não ter vindo no select do banco
-                codigos_banco = df_merged["Código"].tolist()
-                df_excecoes_out = df_excecoes[~df_excecoes["Código"].isin(codigos_banco)]
-                
-                # Unificar catálogo
-                df_final = pd.concat([df_merged, df_excecoes_out], ignore_index=True)
-                
-                salvar_catalogo(df_final)
-                st.session_state['reset_counter_folhagem'] += 1
-                st.success("✅ Base sincronizada com o Postgres! Atualizando...")
-                st.rerun()
-            else:
-                st.warning("Nenhum dado retornado do Postgres.")
-
     with st.container(border=True):
         col_cfg_cat = {
-            "Código":     st.column_config.NumberColumn("Cód.", width=80, format="%d"),
-            "Descrição":  st.column_config.TextColumn("Descrição do Item", width=300),
-            "Fornecedor": st.column_config.TextColumn("Fornecedor", width=180),
-            "Exceção":    st.column_config.CheckboxColumn("⚠️ Exceção", default=False, help="Marque para este item não ser apagado/sobrescrito pelo Banco de Dados"),
+            "Código":             st.column_config.NumberColumn("Cód.", width=80, format="%d", disabled=True),
+            "Descrição":          st.column_config.TextColumn("Descrição (ERP)", width=220, disabled=True),
+            "Nome Personalizado": st.column_config.TextColumn("Nome Personalizado", width=220),
+            "Fornecedor":         st.column_config.TextColumn("Fornecedor", width=180),
+            "Exceção":            st.column_config.CheckboxColumn("⚠️ Exceção", default=False, help="Impede que o item seja apagado/sobrescrito pelo Banco de Dados"),
         }
         for loja in LOJAS:
             col_cfg_cat[loja] = st.column_config.CheckboxColumn(loja, default=False)
             
-        # Reordenar exibição para Lojas ficarem antes ou depois da exceção
-        cols_cat_ordem = ["Código", "Descrição", "Fornecedor", "Exceção"] + LOJAS
+        # Reordenar exibição do catálogo
+        cols_cat_ordem = ["Código", "Descrição", "Nome Personalizado", "Fornecedor", "Exceção"] + LOJAS
             
         edited_cat = st.data_editor(
             df_catalogo[cols_cat_ordem],
@@ -826,9 +805,42 @@ elif perfil_navegacao == "Catálogo de Produtos":
             key=f"editor_catalogo_folhagem_{st.session_state['reset_counter_folhagem']}"
         )
         
-        st.divider()
-        if st.button("💾 Salvar Catálogo no Google Sheets", type="primary", use_container_width=True):
+    st.divider()
+    
+    # Botões na parte inferior organizados
+    col_salvar, col_puxar, col_space = st.columns([2, 2, 6])
+    
+    with col_salvar:
+        if st.button("💾 Salvar Catálogo", type="primary", use_container_width=True):
             salvar_catalogo(edited_cat)
             st.session_state['reset_counter_folhagem'] += 1
             st.success("✅ Catálogo atualizado com sucesso! As alterações já refletem na visão das lojas.")
             st.rerun()
+            
+    with col_puxar:
+        if st.button("🔄 Puxar Nomes do ERP", use_container_width=True):
+            df_pg = buscar_produtos_pg()
+            if not df_pg.empty:
+                df_excecoes = df_catalogo[df_catalogo["Exceção"] == True].copy()
+                
+                # Vamos sobrescrever a Descrição com a do banco, mas manter o Nome Personalizado e os outros dados
+                cols_manter = ["Código", "Nome Personalizado", "Fornecedor", "Exceção"] + LOJAS
+                df_merged = pd.merge(df_pg, df_catalogo[cols_manter], on="Código", how="left")
+                
+                # Preencher NaNs
+                for c in LOJAS + ["Exceção"]:
+                    df_merged[c] = df_merged[c].fillna(False)
+                df_merged["Nome Personalizado"] = df_merged["Nome Personalizado"].fillna("")
+                
+                # Resgatar exceções que não retornaram no SELECT do banco
+                codigos_banco = df_merged["Código"].tolist()
+                df_excecoes_out = df_excecoes[~df_excecoes["Código"].isin(codigos_banco)]
+                
+                df_final = pd.concat([df_merged, df_excecoes_out], ignore_index=True)
+                
+                salvar_catalogo(df_final)
+                st.session_state['reset_counter_folhagem'] += 1
+                st.success("✅ Títulos e produtos atualizados pelo Banco de Dados! Atualizando a página...")
+                st.rerun()
+            else:
+                st.warning("Nenhum dado retornado do Postgres.")
