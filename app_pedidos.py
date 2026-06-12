@@ -231,15 +231,19 @@ def buscar_estoque_pg(loja_nome, codigos):
     
     # 🔥 MUDE AQUI A SUA QUERY SQL PARA O ESTOQUE 🔥
     query = f"""
-        SELECT 
-            codigo AS "Código", 
-            estoque AS "Estoque" 
-        FROM sua_tabela_estoque 
-        WHERE loja_id = {loja_id} 
-        AND codigo IN ({cods_str})
+        SELECT cadprodemp.cade_codempresa,
+    cadprodemp.cade_codigo,
+    cadprod.cadp_descricao,
+    cadprodemp.cade_estoque1::numeric(18,2) AS estoque,
+    cadprodemp.cade_estoque6::numeric(18,2) AS estoqueemb
+   FROM cadprodemp
+     JOIN cadprod ON cadprodemp.cade_codigo = cadprod.cadp_codigo
+     FULL JOIN mvad ON cadprodemp.cade_codmva::text = mvad.mvad_codmva::text
+  WHERE cadprodemp.cade_ativo::text = 'S'::text AND cadprodemp.cade_codempresa::text <= '031'::text
+  ORDER BY cadprodemp.cade_codempresa, cadprodemp.cade_codigo
     """
     try:
-        df_est = conn_pg.query(query)
+        df_est = conn_pg.query(python_estoque)
         return df_est
     except Exception as e:
         # Se a query falhar ou o banco estiver offline, retorna zero para não quebrar a tela
@@ -248,15 +252,19 @@ def buscar_estoque_pg(loja_nome, codigos):
 def buscar_produtos_pg():
     # 🔥 MUDE AQUI A SUA QUERY SQL PARA PUXAR O CATÁLOGO DA FOLHAGEM 🔥
     query = """
-        SELECT 
-            codigo AS "Código", 
-            descricao AS "Descrição", 
-            fornecedor AS "Fornecedor" 
-        FROM sua_tabela_produtos 
-        WHERE departamento = 'FOLHAGEM' AND status = 'ATIVO'
+        SELECT cadprodemp.cade_codempresa,
+    cadprodemp.cade_codigo,
+    cadprod.cadp_descricao,
+    cadprodemp.cade_estoque1::numeric(18,2) AS estoque,
+    cadprodemp.cade_estoque6::numeric(18,2) AS estoqueemb
+   FROM cadprodemp
+     JOIN cadprod ON cadprodemp.cade_codigo = cadprod.cadp_codigo
+     FULL JOIN mvad ON cadprodemp.cade_codmva::text = mvad.mvad_codmva::text
+  WHERE cadprodemp.cade_ativo::text = 'S'::text AND cadprodemp.cade_codempresa::text <= '031'::text
+  ORDER BY cadprodemp.cade_codempresa, cadprodemp.cade_codigo
     """
     try:
-        return conn_pg.query(query)
+        return conn_pg.query(python_estoque)
     except Exception as e:
         st.error(f"Erro ao buscar produtos no Postgres: {e}")
         return pd.DataFrame()
