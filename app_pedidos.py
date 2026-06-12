@@ -242,12 +242,22 @@ def buscar_estoque_pg(loja_nome, codigos):
     except Exception as e:
         return pd.DataFrame({"Código": codigos, "Estoque": 0})
 
-def buscar_produtos_pg():
-    query = """
+def buscar_produtos_pg(codigos):
+    """
+    Agora recebe os códigos atuais da planilha para buscar SOMENTE
+    os nomes deles, evitando puxar o banco inteiro.
+    """
+    if not codigos:
+        return pd.DataFrame(columns=["Código", "Descrição"])
+        
+    cods_str = ", ".join(map(str, set(codigos)))
+    
+    query = f"""
         SELECT DISTINCT
             cade_codigo AS "Código",
             cadp_descricao AS "Descrição"
         FROM python_estoque
+        WHERE cade_codigo IN ({cods_str})
     """
     try:
         return conn_pg.query(query)
@@ -783,7 +793,7 @@ elif perfil_navegacao == "Catálogo de Produtos":
     
     with st.container(border=True):
         col_cfg_cat = {
-            "Código":             st.column_config.NumberColumn("Cód.", width=80, format="%d", disabled=True),
+            "Código":             st.column_config.NumberColumn("Cód.", width=80, format="%d"),
             "Descrição":          st.column_config.TextColumn("Descrição (ERP)", width=220, disabled=True),
             "Nome Personalizado": st.column_config.TextColumn("Nome Personalizado", width=220),
             "Fornecedor":         st.column_config.TextColumn("Fornecedor", width=180),
@@ -819,28 +829,26 @@ elif perfil_navegacao == "Catálogo de Produtos":
             
     with col_puxar:
         if st.button("🔄 Puxar Nomes do ERP", use_container_width=True):
-            df_pg = buscar_produtos_pg()
-            if not df_pg.empty:
-                df_excecoes = df_catalogo[df_catalogo["Exceção"] == True].copy()
-                
-                # Vamos sobrescrever a Descrição com a do banco, mas manter o Nome Personalizado e os outros dados
-                cols_manter = ["Código", "Nome Personalizado", "Fornecedor", "Exceção"] + LOJAS
-                df_merged = pd.merge(df_pg, df_catalogo[cols_manter], on="Código", how="left")
-                
-                # Preencher NaNs
-                for c in LOJAS + ["Exceção"]:
-                    df_merged[c] = df_merged[c].fillna(False)
-                df_merged["Nome Personalizado"] = df_merged["Nome Personalizado"].fillna("")
-                
-                # Resgatar exceções que não retornaram no SELECT do banco
-                codigos_banco = df_merged["Código"].tolist()
-                df_excecoes_out = df_excecoes[~df_excecoes["Código"].isin(codigos_banco)]
-                
-                df_final = pd.concat([df_merged, df_excecoes_out], ignore_index=True)
-                
-                salvar_catalogo(df_final)
-                st.session_state['reset_counter_folhagem'] += 1
-                st.success("✅ Títulos e produtos atualizados pelo Banco de Dados! Atualizando a página...")
-                st.rerun()
+            # 1. Pega APENAS os códigos que já estão na tabela para evitar importar a base inteira
+            codigos_atuais = edited_cat["Código"].unique().tolist()
+            codigos_atuais = [c for c in codigos_atuais if c > 0]
+            
+            if not codigos_atuais:
+                st.warning("Não há códigos na tabela para atualizar.")
             else:
-                st.warning("Nenhum dado retornado do Postgres.")
+                df_pg = buscar_produtos_pg(codigos_atuais)
+                
+                if not df_pg.empty:
+                    # 2. Cria um "dicionário" que liga o Código ao Nome do Banco de Dados
+                    dict_nomes = dict(zip(df_pg["Código"], df_pg["Descrição"]))
+                    
+                    # 3. Atualiza APENAS a coluna de descrição do ERP
+                    edited_cat["Descrição"] = edited_cat["Código"].map(dict_nomes).fillna(edited_cat["Descrição"])
+                    
+                    # 4. Salva o catálogo com os títulos novos mantendo todos os outros dados intactos
+                    salvar_catalogo(edited_cat)
+                    st.session_state['reset_counter_folhagem'] += 1
+                    st.success("✅ Nomes atualizados com sucesso de acordo com os códigos inseridos!")
+                    st.rerun()
+                else:
+                    st.warning("Nenhum código encontrado no Postgres para atualizar.")
