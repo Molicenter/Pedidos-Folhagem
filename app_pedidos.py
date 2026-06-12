@@ -214,7 +214,7 @@ MAPA_LOJAS = {l: l for l in LOJAS}
 # CONEXÕES COM BANCOS DE DADOS
 # ─────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
-conn_pg = st.connection("postgresql", type="sql")
+conn_pg = st.connection("banco_erp", type="sql")
 
 # ─────────────────────────────────────────────
 # FUNÇÕES DE BANCO DE DADOS (POSTGRES)
