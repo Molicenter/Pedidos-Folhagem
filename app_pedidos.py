@@ -141,7 +141,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover {
 
 /* REGRAS DE IMPRESSÃO AJUSTADAS */
 @media print {
-    @page { margin: 5mm 10mm; } /* Reduzida margem de topo/base para caber mais linhas */
+    @page { margin: 5mm 10mm; } 
     .stApp, .main, body, html {
         background-color: #ffffff !important;
         color: #000000 !important;
@@ -178,14 +178,14 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover {
     table.print-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 10px !important; /* Fonte ligeiramente menor */
+        font-size: 10px !important; 
         color: #000000 !important;
         font-family: 'IBM Plex Sans', sans-serif;
         line-height: 1.05 !important;
     }
     table.print-table th, table.print-table td {
         border: 1px solid #000000 !important;
-        padding: 2px 4px !important; /* Espaçamento interno espremido */
+        padding: 2px 4px !important; 
         text-align: left;
         color: #000000 !important;
         background-color: #ffffff !important;
@@ -211,16 +211,65 @@ LOJAS = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja
 MAPA_LOJAS = {l: l for l in LOJAS}
 
 # ─────────────────────────────────────────────
-# CONEXÃO GOOGLE SHEETS & FUNÇÕES DE DADOS
+# CONEXÕES COM BANCOS DE DADOS
 # ─────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
+# Adicionada a conexão com Postgres igual ao açougue
+conn_pg = st.connection("postgresql", type="sql")
 
+# ─────────────────────────────────────────────
+# FUNÇÕES DE BANCO DE DADOS (POSTGRES)
+# ─────────────────────────────────────────────
+@st.cache_data(ttl=60)
+def buscar_estoque_pg(loja_nome, codigos):
+    if not codigos:
+        return pd.DataFrame(columns=["Código", "Estoque"])
+    
+    # Extrai o ID numérico da loja (ex: "Loja 01" -> 1) para a query, se seu banco usar ID.
+    loja_id = int(loja_nome.split()[-1])
+    cods_str = ", ".join(map(str, set(codigos)))
+    
+    # 🔥 MUDE AQUI A SUA QUERY SQL PARA O ESTOQUE 🔥
+    query = f"""
+        SELECT 
+            codigo AS "Código", 
+            estoque AS "Estoque" 
+        FROM sua_tabela_estoque 
+        WHERE loja_id = {loja_id} 
+        AND codigo IN ({cods_str})
+    """
+    try:
+        df_est = conn_pg.query(query)
+        return df_est
+    except Exception as e:
+        # Se a query falhar ou o banco estiver offline, retorna zero para não quebrar a tela
+        return pd.DataFrame({"Código": codigos, "Estoque": 0})
+
+def buscar_produtos_pg():
+    # 🔥 MUDE AQUI A SUA QUERY SQL PARA PUXAR O CATÁLOGO DA FOLHAGEM 🔥
+    query = """
+        SELECT 
+            codigo AS "Código", 
+            descricao AS "Descrição", 
+            fornecedor AS "Fornecedor" 
+        FROM sua_tabela_produtos 
+        WHERE departamento = 'FOLHAGEM' AND status = 'ATIVO'
+    """
+    try:
+        return conn_pg.query(query)
+    except Exception as e:
+        st.error(f"Erro ao buscar produtos no Postgres: {e}")
+        return pd.DataFrame()
+
+# ─────────────────────────────────────────────
+# FUNÇÕES DE GOOGLE SHEETS
+# ─────────────────────────────────────────────
 @st.cache_data(ttl=15)
 def carregar_catalogo_folhagem():
     df = conn.read(worksheet="Produtos_Folhagem", ttl=0, usecols=list(range(20)))
     
     if df.empty:
-        return pd.DataFrame(columns=["Código", "Descrição", "Fornecedor"] + LOJAS)
+        return pd.DataFrame(columns=["Código", "Descrição", "Fornecedor", "Exceção"] + LOJAS)
     
     # Limpeza de cabeçalhos
     novas_colunas = {}
@@ -229,12 +278,16 @@ def carregar_catalogo_folhagem():
         for loja in LOJAS:
             if loja.lower() in col_str.lower():
                 novas_colunas[col] = loja
+        if "exce" in col_str.lower():
+            novas_colunas[col] = "Exceção"
+            
     df = df.rename(columns=novas_colunas)
     
-    # 🔥 PARSER CORRIGIDO — trata NaN, bool nativo e string
-    for loja in LOJAS:
-        if loja not in df.columns:
-            df[loja] = False
+    # Tratamento de booleanos para Lojas e para a coluna Exceção
+    colunas_booleanas = LOJAS + ["Exceção"]
+    for col in colunas_booleanas:
+        if col not in df.columns:
+            df[col] = False
         else:
             def parse_bool(x):
                 if isinstance(x, bool):
@@ -242,7 +295,7 @@ def carregar_catalogo_folhagem():
                 if isinstance(x, (int, float)):
                     return bool(x) and not pd.isna(x)
                 return str(x).strip().upper() in ['TRUE', 'VERDADEIRO', '1', 'V', 'SIM', 'YES', 'T', 'X']
-            df[loja] = df[loja].apply(parse_bool)
+            df[col] = df[col].apply(parse_bool)
             
     if "Código" in df.columns:
         df["Código"] = pd.to_numeric(df["Código"], errors='coerce').fillna(0).astype(int)
@@ -254,7 +307,6 @@ def carregar_pedidos():
     df_pedidos = conn.read(worksheet="Folhagem", ttl=0)
     df_cat = carregar_catalogo_folhagem()
     
-    # Aplica a mesma limpeza agressiva na aba de pedidos
     if not df_pedidos.empty:
         novas_colunas_ped = {}
         for col in df_pedidos.columns:
@@ -551,15 +603,29 @@ elif perfil_navegacao == "Visão das Lojas":
         how="left"
     )
     df_loja_view[loja_selecionada] = df_loja_view[loja_selecionada].fillna(0).astype(int)
+    
+    # Busca o Estoque do Postgres para a Loja Atual
+    codigos_lista = df_loja_view["Código"].unique().tolist()
+    df_estoque = buscar_estoque_pg(loja_selecionada, codigos_lista)
+    
+    # Merge com Estoque
+    df_loja_view = pd.merge(df_loja_view, df_estoque, on="Código", how="left")
+    df_loja_view["Estoque"] = df_loja_view["Estoque"].fillna(0).astype(int)
+    
     df_loja_view = df_loja_view.rename(columns={loja_selecionada: "Qtde"})
 
+    # Reordenar colunas para o Estoque ficar antes da Qtde
+    cols_order_view = ["Fornecedor", "Código", "Descrição", "Estoque", "Qtde"]
+    df_loja_view = df_loja_view[cols_order_view]
+
     with st.container(border=True):
-        st.info("💡 Preencha a *Qtde* desejada para cada produto. Apenas os fornecedores e itens atrelados a esta loja são exibidos.")
+        st.info("💡 Preencha a *Qtde* desejada para cada produto. O **Estoque** é puxado automaticamente do sistema.")
 
         col_cfg_loja = {
             "Fornecedor": st.column_config.TextColumn("Fornecedor", width=150, disabled=True),
             "Código":     st.column_config.NumberColumn("Cód", width=65, format="%d", disabled=True),
             "Descrição":  st.column_config.TextColumn("Produto", width=220, disabled=True),
+            "Estoque":    st.column_config.NumberColumn("📦 Estoque", width=80, format="%d", disabled=True),
             "Qtde":       st.column_config.NumberColumn("🛒 Qtde", width=90, min_value=0, step=1),
         }
 
@@ -656,7 +722,6 @@ elif perfil_navegacao == "Visão Fornecedores (Resumo)":
             for c in lojas_cols_renomeadas:
                 col_cfg_forn[c] = st.column_config.NumberColumn(c, format="%d", disabled=False, min_value=0)
 
-            # 🔥 AJUSTE APLICADO AQUI: Altura exata sem sobrar linha em branco 🔥
             altura = (len(df_forn) * 35) + 42 
 
             with cols[j]:
@@ -702,25 +767,58 @@ elif perfil_navegacao == "Catálogo de Produtos":
         <span style="font-size: 26px; margin-right: 12px;">🗂️</span>
         <div style="display: inline-block; vertical-align: top;">
             <div style="font-size: 20px; font-weight: 700; color: var(--text-header);">Catálogo de Folhagem</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Gerencie itens e controle a visibilidade por loja através das caixas de seleção</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Gerencie itens, atualize pelo banco e controle a visibilidade por loja através das caixas de seleção</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     df_catalogo = carregar_catalogo_folhagem()
     
+    col_btn_sync, col_space = st.columns([2, 5])
+    with col_btn_sync:
+        if st.button("🔄 Atualizar Produtos com BD Postgres", use_container_width=True):
+            df_pg = buscar_produtos_pg()
+            if not df_pg.empty:
+                # Isolar produtos marcados como exceção
+                df_excecoes = df_catalogo[df_catalogo["Exceção"] == True].copy()
+                
+                # Fazer o merge dos novos produtos, mantendo a parametrização antiga se já existia
+                cols_manter = ["Código"] + LOJAS + ["Exceção"]
+                df_merged = pd.merge(df_pg, df_catalogo[cols_manter], on="Código", how="left")
+                
+                # Preencher NaNs com False nas lojas novas vindas do banco
+                for c in LOJAS + ["Exceção"]:
+                    df_merged[c] = df_merged[c].fillna(False)
+                
+                # Resgatar as exceções que possam não ter vindo no select do banco
+                codigos_banco = df_merged["Código"].tolist()
+                df_excecoes_out = df_excecoes[~df_excecoes["Código"].isin(codigos_banco)]
+                
+                # Unificar catálogo
+                df_final = pd.concat([df_merged, df_excecoes_out], ignore_index=True)
+                
+                salvar_catalogo(df_final)
+                st.session_state['reset_counter_folhagem'] += 1
+                st.success("✅ Base sincronizada com o Postgres! Atualizando...")
+                st.rerun()
+            else:
+                st.warning("Nenhum dado retornado do Postgres.")
+
     with st.container(border=True):
-        
         col_cfg_cat = {
             "Código":     st.column_config.NumberColumn("Cód.", width=80, format="%d"),
             "Descrição":  st.column_config.TextColumn("Descrição do Item", width=300),
             "Fornecedor": st.column_config.TextColumn("Fornecedor", width=180),
+            "Exceção":    st.column_config.CheckboxColumn("⚠️ Exceção", default=False, help="Marque para este item não ser apagado/sobrescrito pelo Banco de Dados"),
         }
         for loja in LOJAS:
             col_cfg_cat[loja] = st.column_config.CheckboxColumn(loja, default=False)
             
+        # Reordenar exibição para Lojas ficarem antes ou depois da exceção
+        cols_cat_ordem = ["Código", "Descrição", "Fornecedor", "Exceção"] + LOJAS
+            
         edited_cat = st.data_editor(
-            df_catalogo,
+            df_catalogo[cols_cat_ordem],
             use_container_width=True,
             hide_index=True,
             height=600,
