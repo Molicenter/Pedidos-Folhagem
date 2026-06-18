@@ -302,7 +302,7 @@ def atualizar_vendas_90d():
         return False
 
 # ─────────────────────────────────────────────
-# FUNÇÕES DE GOOGLE SHEETS
+# FUNÇÕES DE GOOGLE SHEETS COM TRATAMENTO DE ERROS
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=15)
 def carregar_catalogo_folhagem():
@@ -382,12 +382,22 @@ def carregar_vendas_90d():
         return pd.DataFrame(columns=["loja", "codigo", "media_dia"])
 
 def salvar_pedidos(df_to_save):
-    conn.update(worksheet="Folhagem", data=df_to_save)
-    st.cache_data.clear()
+    try:
+        conn.update(worksheet="Folhagem", data=df_to_save)
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Erro técnico ao salvar os pedidos no Google Sheets: {e}")
+        return False
 
 def salvar_catalogo(df_to_save):
-    conn.update(worksheet="Produtos_Folhagem", data=df_to_save)
-    st.cache_data.clear()
+    try:
+        conn.update(worksheet="Produtos_Folhagem", data=df_to_save)
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Erro técnico ao salvar o catálogo no Google Sheets: {e}")
+        return False
 
 # ─────────────────────────────────────────────
 # SISTEMA DE LOGIN
@@ -517,13 +527,17 @@ def modal_zerar_pedidos():
             st.rerun()
     with c2:
         if st.button("✔️ Sim, zerar tudo", type="primary", use_container_width=True):
-            st.session_state['reset_counter_folhagem'] += 1
-            df_main = carregar_pedidos()
-            for loja in LOJAS:
-                if loja in df_main.columns:
-                    df_main[loja] = 0
-            salvar_pedidos(df_main)
-            st.rerun()
+            with st.spinner("Zerando base de dados na nuvem..."):
+                st.session_state['reset_counter_folhagem'] += 1
+                df_main = carregar_pedidos()
+                for loja in LOJAS:
+                    if loja in df_main.columns:
+                        df_main[loja] = 0
+                
+                if salvar_pedidos(df_main):
+                    st.rerun()
+                else:
+                    st.error("⚠️ Falha ao zerar os pedidos. Tente novamente.")
 
 # ─────────────────────────────────────────────
 # ROTA 1 — SEPARAÇÃO E FECHAMENTO (Admin)
@@ -588,10 +602,13 @@ if perfil_navegacao == "Separação e Fechamento":
 
         with col_salvar:
             if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-                df_to_save = df_editado.drop(columns=["TOTAL GERAL"])
-                salvar_pedidos(df_to_save)
-                st.success("✅ Pedidos salvos na nuvem com sucesso!")
-                st.rerun()
+                with st.spinner("Salvando na nuvem..."):
+                    df_to_save = df_editado.drop(columns=["TOTAL GERAL"])
+                    if salvar_pedidos(df_to_save):
+                        st.success("✅ Pedidos salvos na nuvem com sucesso!")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Erro ao salvar os pedidos na nuvem. Verifique a conexão e tente novamente.")
 
         with col_csv:
             df_csv = df_editado.copy().rename(columns=MAPA_LOJAS)
@@ -677,34 +694,22 @@ elif perfil_navegacao == "Visão das Lojas":
     df_loja_view = pd.merge(df_loja_view, df_estoque, on="Código", how="left")
     df_loja_view["Estoque"] = df_loja_view["Estoque"].fillna(0).astype(int)
 
-    # -------------------------------------------------------------
-    # NOVO: Busca as Vendas de 90 Dias
-    # -------------------------------------------------------------
+    # Busca as Vendas de 90 Dias
     df_vendas_90d = carregar_vendas_90d()
     
     if not df_vendas_90d.empty and "loja" in df_vendas_90d.columns:
-        # Pega apenas os números da loja (Ex: 'Loja 01' -> '001')
         loja_id_str = f"{int(loja_selecionada.split()[-1]):03d}"
-        
-        # Filtra os dados de vendas da aba Folhagem_90d para a loja correspondente
         df_vendas_loja = df_vendas_90d[df_vendas_90d["loja"].astype(str).str.zfill(3) == loja_id_str].copy()
-        
-        # Garante o tipo inteiro do código para o merge dar certo
         df_vendas_loja["codigo"] = pd.to_numeric(df_vendas_loja["codigo"], errors="coerce").fillna(0).astype(int)
         df_vendas_loja = df_vendas_loja.rename(columns={"codigo": "Código", "media_dia": "Venda 90d"})
-        
-        # Faz o merge para trazer a coluna Venda 90d
         df_loja_view = pd.merge(df_loja_view, df_vendas_loja[["Código", "Venda 90d"]], on="Código", how="left")
     else:
-        # Se a aba estiver vazia ou não tiver sido gerada, a coluna fica com 0
         df_loja_view["Venda 90d"] = 0.0
 
     df_loja_view["Venda 90d"] = df_loja_view["Venda 90d"].fillna(0.0).astype(float)
-    # -------------------------------------------------------------
-
     df_loja_view = df_loja_view.rename(columns={loja_selecionada: "Qtde"})
 
-    # Reordenar colunas incluindo a Venda 90d
+    # Reordenar colunas
     cols_order_view = ["Fornecedor", "Código", "Descrição", "Estoque", "Venda 90d", "Qtde"]
     df_loja_view = df_loja_view[cols_order_view]
 
@@ -743,24 +748,32 @@ elif perfil_navegacao == "Visão das Lojas":
         with col_btn:
             st.write("<br>", unsafe_allow_html=True)
             if st.button("💾 Salvar Pedido da Semana", type="primary", use_container_width=True):
-                df_main = carregar_pedidos()
-                
-                for _, row in df_editado.iterrows():
-                    mask = (
-                        (df_main["Fornecedor"] == row["Fornecedor"]) &
-                        (df_main["Código"] == row["Código"])
-                    )
-                    if mask.any():
-                        df_main.loc[mask, loja_selecionada] = row["Qtde"]
-                        df_main.loc[mask, "Descrição"] = row["Descrição"] # Garante atualização do nome na aba Folhagem
-                    else:
-                        nova_linha = {"Fornecedor": row["Fornecedor"], "Código": row["Código"], "Descrição": row["Descrição"]}
-                        for l in LOJAS: nova_linha[l] = 0
-                        nova_linha[loja_selecionada] = row["Qtde"]
-                        df_main = pd.concat([df_main, pd.DataFrame([nova_linha])], ignore_index=True)
-                
-                salvar_pedidos(df_main)
-                st.success(f"✅ Pedido da {loja_selecionada} enviado para a nuvem com sucesso!")
+                with st.spinner("Enviando dados para a nuvem..."):
+                    try:
+                        df_main = carregar_pedidos()
+                        
+                        for _, row in df_editado.iterrows():
+                            mask = (
+                                (df_main["Fornecedor"] == row["Fornecedor"]) &
+                                (df_main["Código"] == row["Código"])
+                            )
+                            if mask.any():
+                                df_main.loc[mask, loja_selecionada] = row["Qtde"]
+                                df_main.loc[mask, "Descrição"] = row["Descrição"]
+                            else:
+                                nova_linha = {"Fornecedor": row["Fornecedor"], "Código": row["Código"], "Descrição": row["Descrição"]}
+                                for l in LOJAS: nova_linha[l] = 0
+                                nova_linha[loja_selecionada] = row["Qtde"]
+                                df_main = pd.concat([df_main, pd.DataFrame([nova_linha])], ignore_index=True)
+                        
+                        # Verifica o retorno para só dar sucesso se foi gravado
+                        if salvar_pedidos(df_main):
+                            st.success(f"✅ Pedido da {loja_selecionada} enviado para a nuvem com sucesso!")
+                        else:
+                            st.error("⚠️ Falha ao registrar o pedido na nuvem. Por favor, clique em Salvar novamente.")
+                            
+                    except Exception as e:
+                        st.error(f"⚠️ Erro ao preparar os dados da planilha: {e}. Tente novamente.")
 
 # ─────────────────────────────────────────────
 # ROTA 3 — VISÃO FORNECEDORES / RESUMO (Admin)
@@ -896,10 +909,13 @@ elif perfil_navegacao == "Catálogo de Produtos":
     
     with col_salvar:
         if st.button("💾 Salvar Catálogo", type="primary", use_container_width=True):
-            salvar_catalogo(edited_cat)
-            st.session_state['reset_counter_folhagem'] += 1
-            st.success("✅ Catálogo atualizado com sucesso! As alterações já refletem na visão das lojas.")
-            st.rerun()
+            with st.spinner("Salvando catálogo na nuvem..."):
+                if salvar_catalogo(edited_cat):
+                    st.session_state['reset_counter_folhagem'] += 1
+                    st.success("✅ Catálogo atualizado com sucesso! As alterações já refletem na visão das lojas.")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Erro ao salvar o catálogo na nuvem. Verifique a conexão e tente novamente.")
             
     with col_puxar:
         if st.button("🔄 Puxar Nomes do ERP", use_container_width=True):
@@ -910,19 +926,22 @@ elif perfil_navegacao == "Catálogo de Produtos":
             if not codigos_atuais:
                 st.warning("Não há códigos na tabela para atualizar.")
             else:
-                df_pg = buscar_produtos_pg(codigos_atuais)
-                
-                if not df_pg.empty:
-                    # 2. Cria um "dicionário" que liga o Código ao Nome do Banco de Dados
-                    dict_nomes = dict(zip(df_pg["Código"], df_pg["Descrição"]))
+                with st.spinner("Consultando ERP e atualizando nomes..."):
+                    df_pg = buscar_produtos_pg(codigos_atuais)
                     
-                    # 3. Atualiza APENAS a coluna de descrição do ERP fazendo o mapeamento exato
-                    edited_cat["Descrição"] = edited_cat["Código"].map(dict_nomes).fillna(edited_cat["Descrição"])
-                    
-                    # 4. Salva o catálogo apenas com as atualizações de nome
-                    salvar_catalogo(edited_cat)
-                    st.session_state['reset_counter_folhagem'] += 1
-                    st.success("✅ Nomes atualizados com sucesso de acordo com os códigos inseridos!")
-                    st.rerun()
-                else:
-                    st.warning("Nenhum código encontrado no Postgres para atualizar.")
+                    if not df_pg.empty:
+                        # 2. Cria um "dicionário" que liga o Código ao Nome do Banco de Dados
+                        dict_nomes = dict(zip(df_pg["Código"], df_pg["Descrição"]))
+                        
+                        # 3. Atualiza APENAS a coluna de descrição do ERP fazendo o mapeamento exato
+                        edited_cat["Descrição"] = edited_cat["Código"].map(dict_nomes).fillna(edited_cat["Descrição"])
+                        
+                        # 4. Salva o catálogo apenas com as atualizações de nome
+                        if salvar_catalogo(edited_cat):
+                            st.session_state['reset_counter_folhagem'] += 1
+                            st.success("✅ Nomes atualizados com sucesso de acordo com os códigos inseridos!")
+                            st.rerun()
+                        else:
+                            st.error("⚠️ Falha ao gravar os novos nomes na nuvem. Tente novamente.")
+                    else:
+                        st.warning("Nenhum código encontrado no Postgres para atualizar.")
